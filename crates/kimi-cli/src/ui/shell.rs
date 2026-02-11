@@ -30,6 +30,8 @@ pub struct ShellUI {
     #[allow(dead_code)]
     cli: Cli,
     config: Config,
+    mode: ShellMode,
+    current_model: String,
 }
 
 /// Custom highlighter for the shell
@@ -43,12 +45,51 @@ impl Highlighter for ShellHighlighter {
     }
 }
 
+/// Operating mode for the shell
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShellMode {
+    /// Agent mode - AI assistant with tool calling
+    Agent,
+    /// Shell mode - traditional command execution
+    Shell,
+}
+
+impl std::fmt::Display for ShellMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShellMode::Agent => write!(f, "agent"),
+            ShellMode::Shell => write!(f, "shell"),
+        }
+    }
+}
+
 /// Custom prompt for Kimi
-struct KimiPrompt;
+struct KimiPrompt {
+    mode: ShellMode,
+    model: String,
+}
+
+impl KimiPrompt {
+    fn new(mode: ShellMode, model: String) -> Self {
+        Self { mode, model }
+    }
+}
 
 impl Prompt for KimiPrompt {
     fn render_prompt_left(&self) -> Cow<'_, str> {
-        Cow::Owned(Style::new().bold().fg(Color::Green).paint("kimi").to_string())
+        let mode_color = match self.mode {
+            ShellMode::Agent => Color::Green,
+            ShellMode::Shell => Color::Blue,
+        };
+        let mode_indicator = match self.mode {
+            ShellMode::Agent => "🤖",
+            ShellMode::Shell => "🐚",
+        };
+        Cow::Owned(format!(
+            "{} {}",
+            Style::new().bold().fg(mode_color).paint(format!("kimi {}", mode_indicator)),
+            Style::new().fg(Color::DarkGray).paint(format!("[{}]", self.model))
+        ))
     }
 
     fn render_prompt_right(&self) -> Cow<'_, str> {
@@ -56,11 +97,19 @@ impl Prompt for KimiPrompt {
     }
 
     fn render_prompt_indicator(&self, _prompt_mode: reedline::PromptEditMode) -> Cow<'_, str> {
-        Cow::Owned(Style::new().fg(Color::Cyan).paint(" ❯ ").to_string())
+        let color = match self.mode {
+            ShellMode::Agent => Color::Green,
+            ShellMode::Shell => Color::Blue,
+        };
+        Cow::Owned(Style::new().bold().fg(color).paint(" ❯ ").to_string())
     }
 
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Owned(Style::new().fg(Color::Cyan).paint("... ").to_string())
+        let color = match self.mode {
+            ShellMode::Agent => Color::Green,
+            ShellMode::Shell => Color::Blue,
+        };
+        Cow::Owned(Style::new().fg(color).paint("... ").to_string())
     }
 
     fn render_prompt_history_search_indicator(
@@ -125,6 +174,7 @@ impl KimiCompleter {
             "/setup".to_string(),
             "/logout".to_string(),
             "/init".to_string(),
+            "/mode".to_string(),
         ];
         let inner = DefaultCompleter::new_with_wordlen(commands, 1);
         Self { inner }
@@ -143,28 +193,121 @@ impl ShellUI {
         info!("Initializing interactive shell UI");
 
         let editor = Self::create_editor()?;
-        let prompt = Box::new(KimiPrompt);
         
         // Load config
         let config = load_config(None).map_err(|e| {
             UIError::Shell(format!("Failed to load config: {}", e))
         })?;
         
-        // Debug: Show loaded config info
-        if !config.default_model.is_empty() {
-            println!("Loaded config with default model: {}", config.default_model);
-        } else if !config.models.is_empty() {
-            println!("Loaded config with {} models (no default set)", config.models.len());
+        // Determine current model
+        let current_model = if !config.default_model.is_empty() {
+            config.default_model.clone()
+        } else if let Some((name, _)) = config.models.iter().next() {
+            name.clone()
         } else {
-            println!("No models configured. Use /login to authenticate.");
-        }
+            "none".to_string()
+        };
+
+        let prompt = Box::new(KimiPrompt::new(ShellMode::Agent, current_model.clone()));
+        
+        // Print boot screen
+        Self::print_boot_screen(&current_model, &config);
 
         Ok(Self {
             editor,
             prompt,
             cli,
             config,
+            mode: ShellMode::Agent,
+            current_model,
         })
+    }
+
+    /// Print ASCII art boot screen
+    fn print_boot_screen(model: &str, config: &Config) {
+        println!();
+        
+        // ASCII Art for KIMI
+        let art = r#"
+    ██╗  ██╗██╗███╗   ███╗██╗
+    ██║ ██╔╝██║████╗ ████║██║
+    █████╔╝ ██║██╔████╔██║██║
+    ██╔═██╗ ██║██║╚██╔╝██║██║
+    ██║  ██╗██║██║ ╚═╝ ██║██║
+    ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝
+        "#;
+        
+        for line in art.lines() {
+            println!("{}", Style::new().bold().fg(Color::Cyan).paint(line));
+        }
+        
+        println!();
+        println!("  {} {}", 
+            Style::new().bold().paint("Version:"),
+            Style::new().fg(Color::Green).paint(env!("CARGO_PKG_VERSION"))
+        );
+        println!("  {} {}", 
+            Style::new().bold().paint("Model:"),
+            Style::new().fg(Color::Yellow).paint(model)
+        );
+        
+        // Show provider info
+        let provider_count = config.providers.len();
+        if provider_count > 0 {
+            println!("  {} {}", 
+                Style::new().bold().paint("Providers:"),
+                Style::new().fg(Color::Green).paint(format!("{} configured", provider_count))
+            );
+        } else {
+            println!("  {} {}", 
+                Style::new().bold().paint("Status:"),
+                Style::new().fg(Color::Yellow).paint("Not authenticated - use /login or /setup")
+            );
+        }
+        
+        println!("  {} {}", 
+            Style::new().bold().paint("Mode:"),
+            Style::new().fg(Color::Green).paint("Agent")
+        );
+        
+        println!();
+        println!("  {}", Style::new().fg(Color::DarkGray).paint("Type /help for available commands"));
+        println!("  {}", Style::new().fg(Color::DarkGray).paint("Type /mode to switch between agent and shell mode"));
+        println!();
+    }
+
+    /// Switch between agent and shell mode
+    fn switch_mode(&mut self) {
+        self.mode = match self.mode {
+            ShellMode::Agent => ShellMode::Shell,
+            ShellMode::Shell => ShellMode::Agent,
+        };
+        
+        // Update prompt
+        self.prompt = Box::new(KimiPrompt::new(self.mode, self.current_model.clone()));
+        
+        let mode_str = format!("{:?}", self.mode);
+        let color = match self.mode {
+            ShellMode::Agent => Color::Green,
+            ShellMode::Shell => Color::Blue,
+        };
+        
+        println!("\n{} Switched to {} mode\n", 
+            Style::new().bold().fg(color).paint("✓"),
+            Style::new().bold().fg(color).paint(&mode_str)
+        );
+        
+        match self.mode {
+            ShellMode::Agent => {
+                println!("  {}", Style::new().fg(Color::DarkGray).paint("AI assistant with tool calling enabled"));
+                println!("  {}", Style::new().fg(Color::DarkGray).paint("The AI can use tools to help you"));
+            }
+            ShellMode::Shell => {
+                println!("  {}", Style::new().fg(Color::DarkGray).paint("Traditional shell command execution"));
+                println!("  {}", Style::new().fg(Color::DarkGray).paint("Commands execute directly without AI"));
+            }
+        }
+        println!();
     }
 
     fn create_editor() -> UIResult<Reedline> {
@@ -289,16 +432,130 @@ impl ShellUI {
             return Ok(true);
         }
 
-        // Handle special commands
+        // Handle special commands (always available)
         if input.starts_with('/') {
             return self.handle_command(input, soul).await;
         }
 
-        // Process as regular message through the soul
-        debug!("Processing user input through soul: {}", input);
-        self.process_message_with_soul(input, soul).await?;
+        // Handle based on current mode
+        match self.mode {
+            ShellMode::Agent => {
+                // Process as regular message through the soul
+                debug!("Processing user input through soul: {}", input);
+                self.process_message_with_soul(input, soul).await?;
+            }
+            ShellMode::Shell => {
+                // Execute as shell command directly
+                debug!("Executing shell command: {}", input);
+                self.execute_shell_command(input).await?;
+            }
+        }
 
         Ok(true)
+    }
+
+    /// Execute a shell command in restricted shell mode
+    async fn execute_shell_command(&self, command: &str) -> UIResult<()> {
+        use std::process::Stdio;
+        use tokio::process::Command;
+
+        // List of dangerous commands that are blocked
+        let blocked_commands = [
+            "cd", "chdir", "pushd", "popd",
+            "sudo", "su",
+            "rm -rf /", "rm -rf /*",
+            "> /", ">>", ":(){ :|:& };:",
+        ];
+
+        // Check for blocked commands
+        let cmd_lower = command.to_lowercase();
+        for blocked in &blocked_commands {
+            if cmd_lower.contains(blocked) {
+                println!("\n{} Command '{}' is not allowed in shell mode", 
+                    Style::new().fg(Color::Red).paint("✗"),
+                    blocked
+                );
+                return Ok(());
+            }
+        }
+
+        // Parse command to get the executable
+        let cmd_parts: Vec<&str> = command.split_whitespace().collect();
+        if cmd_parts.is_empty() {
+            return Ok(());
+        }
+
+        let executable = cmd_parts[0];
+
+        // List of allowed commands in shell mode
+        let allowed_commands = [
+            "ls", "ll", "la", "cat", "head", "tail", "less", "more",
+            "grep", "find", "wc", "sort", "uniq", "awk", "sed", "cut",
+            "echo", "printf", "pwd", "whoami", "date", "cal",
+            "git", "cargo", "rustc", "python", "python3", "node", "npm", "yarn",
+            "make", "cmake", "docker", "kubectl",
+            "curl", "wget", "ping", "traceroute", "dig", "nslookup",
+            "tar", "gzip", "gunzip", "zip", "unzip",
+            "chmod", "chown", "mkdir", "rmdir", "touch", "mv", "cp", "rm",
+            "which", "whereis", "file", "stat",
+            "ps", "top", "htop", "df", "du", "free", "uptime",
+            "ssh", "scp", "rsync",
+            "vim", "vi", "nano", "emacs", "code",
+        ];
+
+        if !allowed_commands.contains(&executable) {
+            println!("\n{} Command '{}' is not allowed in shell mode", 
+                Style::new().fg(Color::Red).paint("✗"),
+                executable
+            );
+            println!("  {} Type /mode to switch to agent mode for AI assistance", 
+                Style::new().fg(Color::DarkGray).paint("→")
+            );
+            return Ok(());
+        }
+
+        // Execute the command
+        println!();
+        let start_time = std::time::Instant::now();
+
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(command)
+            .current_dir(&self.cli.effective_work_dir())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| UIError::Shell(format!("Failed to execute command: {}", e)))?;
+
+        let elapsed = start_time.elapsed();
+
+        // Print stdout
+        if !output.stdout.is_empty() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            print!("{}", stdout);
+        }
+
+        // Print stderr
+        if !output.stderr.is_empty() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprint!("{}", Style::new().fg(Color::Yellow).paint(stderr.to_string()));
+        }
+
+        // Print status
+        if output.status.success() {
+            println!("\n{} Command completed in {:.2}s", 
+                Style::new().fg(Color::Green).paint("✓"),
+                elapsed.as_secs_f64()
+            );
+        } else {
+            println!("\n{} Command failed with exit code: {}", 
+                Style::new().fg(Color::Red).paint("✗"),
+                output.status.code().unwrap_or(-1)
+            );
+        }
+
+        Ok(())
     }
 
     async fn handle_command(&mut self, input: &str, soul: &mut KimiSoul) -> UIResult<bool> {
@@ -543,6 +800,10 @@ impl ShellUI {
                 println!("(Full implementation pending)");
                 Ok(true)
             }
+            "/mode" => {
+                self.switch_mode();
+                Ok(true)
+            }
             _ => {
                 println!("Unknown command: {}. Type /help for available commands.", cmd);
                 Ok(true)
@@ -728,16 +989,60 @@ impl ShellUI {
         action: &str,
         description: &str,
     ) -> UIResult<ApprovalKind> {
-        println!("\n{}", Style::new().bold().fg(Color::Yellow).paint("=== Approval Request ==="));
-        println!("{}: {}", Style::new().bold().paint("Action"), action);
-        println!("{}: {}", Style::new().bold().paint("Description"), description);
-        println!("{}", Style::new().fg(Color::DarkGray).paint("(y)es / (n)o / (o)nce"));
+        println!();
+        println!("{}", Style::new().bold().fg(Color::Yellow).paint("╔══════════════════════════════════════════════════════════════╗"));
+        println!("{}", Style::new().bold().fg(Color::Yellow).paint("║                    🔒 APPROVAL REQUIRED                      ║"));
+        println!("{}", Style::new().bold().fg(Color::Yellow).paint("╚══════════════════════════════════════════════════════════════╝"));
+        println!();
+        println!("  {}: {}", 
+            Style::new().bold().paint("Tool"), 
+            Style::new().fg(Color::Cyan).paint(action)
+        );
+        println!("  {}: {}", 
+            Style::new().bold().paint("Action"), 
+            description
+        );
+        println!();
+        println!("  {}", Style::new().fg(Color::DarkGray).paint("Options:"));
+        println!("    {} - {}", 
+            Style::new().bold().fg(Color::Green).paint("y"),
+            Style::new().paint("Yes, approve this action")
+        );
+        println!("    {} - {}", 
+            Style::new().bold().fg(Color::Red).paint("n"),
+            Style::new().paint("No, reject this action")
+        );
+        println!("    {} - {}", 
+            Style::new().bold().fg(Color::Yellow).paint("o"),
+            Style::new().paint("Once, approve this time only")
+        );
+        println!();
+        print!("  {} ", Style::new().bold().paint("Your choice:"));
         
-        // For now, auto-approve in this skeleton implementation
-        // In a real implementation, we'd read user input here
-        println!("{}", Style::new().fg(Color::Green).paint("Auto-approved (skeleton implementation)"));
+        // Flush stdout to ensure prompt appears
+        use std::io::Write;
+        std::io::stdout().flush().map_err(UIError::Io)?;
         
-        Ok(ApprovalKind::Approve)
+        // Read user input
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).map_err(UIError::Io)?;
+        
+        let choice = input.trim().to_lowercase();
+        
+        match choice.as_str() {
+            "y" | "yes" => {
+                println!("  {}\n", Style::new().fg(Color::Green).paint("✓ Approved"));
+                Ok(ApprovalKind::Approve)
+            }
+            "o" | "once" => {
+                println!("  {}\n", Style::new().fg(Color::Yellow).paint("✓ Approved once"));
+                Ok(ApprovalKind::ApproveOnce)
+            }
+            _ => {
+                println!("  {}\n", Style::new().fg(Color::Red).paint("✗ Rejected"));
+                Ok(ApprovalKind::Reject)
+            }
+        }
     }
 
     fn print_help(&self) {
@@ -771,6 +1076,7 @@ impl ShellUI {
         println!("  {} - Show MCP servers and tools", Style::new().fg(Color::Green).paint("/mcp"));
         println!("  {} - Open Web UI (info only)", Style::new().fg(Color::Green).paint("/web"));
         println!("  {} - Analyze codebase and generate AGENTS.md", Style::new().fg(Color::Green).paint("/init"));
+        println!("  {} - Switch between agent and shell mode", Style::new().fg(Color::Green).paint("/mode"));
         
         println!();
         println!(
