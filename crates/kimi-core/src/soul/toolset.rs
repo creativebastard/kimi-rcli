@@ -29,6 +29,20 @@ pub enum ToolError {
     Cancelled,
 }
 
+impl ToolError {
+    /// Create a new ToolError from a string message.
+    /// This creates an Execution error by default.
+    pub fn new(msg: impl Into<String>) -> Self {
+        ToolError::Execution(msg.into())
+    }
+
+    /// Create a new ToolError with a brief summary (for backwards compatibility).
+    /// The brief is ignored in this implementation.
+    pub fn with_brief(msg: impl Into<String>, _brief: impl Into<String>) -> Self {
+        ToolError::Execution(msg.into())
+    }
+}
+
 /// Result type for tool execution
 pub type ToolResult = Result<Value, ToolError>;
 

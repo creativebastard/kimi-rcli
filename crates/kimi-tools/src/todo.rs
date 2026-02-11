@@ -1,6 +1,6 @@
 //! SetTodoList tool - manage a todo list for the agent.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -41,6 +41,7 @@ pub struct TodoItemInput {
 }
 
 /// Tool for managing a todo list.
+#[derive(Debug)]
 pub struct SetTodoListTool {
     items: Arc<RwLock<Vec<TodoItem>>>,
 }
@@ -172,7 +173,7 @@ impl Tool for SetTodoListTool {
         // Format output
         let output = self.format_todo_list(&items);
 
-        Ok(ToolOutput::new(output))
+        Ok(serde_json::json!(output))
     }
 }
 
@@ -208,7 +209,8 @@ mod tests {
         let result = tool.execute(params).await;
         assert!(result.is_ok());
 
-        let output = result.unwrap().output;
+        let value = result.unwrap();
+        let output = value.as_str().unwrap_or("");
         assert!(output.contains("Task 1"));
         assert!(output.contains("Task 2"));
         assert!(output.contains("high"));

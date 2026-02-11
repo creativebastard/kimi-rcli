@@ -1,6 +1,6 @@
 //! Shell tool - execute shell commands.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::process::Stdio;
@@ -21,6 +21,7 @@ fn default_timeout() -> u64 {
 }
 
 /// Tool for executing shell commands.
+#[derive(Debug)]
 pub struct ShellTool {
     shell: String,
     shell_arg: String,
@@ -140,14 +141,12 @@ impl Tool for ShellTool {
 
         // Check exit code
         if exit_code != 0 {
-            let brief = format!("Exit code: {exit_code}");
-            return Err(ToolError::with_brief(
-                format!("Command failed with exit code {exit_code}:\n{output}"),
-                brief,
-            ));
+            return Err(ToolError::new(format!(
+                "Command failed with exit code {exit_code}:\n{output}"
+            )));
         }
 
-        Ok(ToolOutput::new(output))
+        Ok(serde_json::json!(output))
     }
 }
 
@@ -172,6 +171,8 @@ mod tests {
 
         let result = tool.execute(params).await;
         assert!(result.is_ok());
-        assert!(result.unwrap().output.contains("Hello World"));
+        let value = result.unwrap();
+        let output = value.as_str().unwrap_or("");
+        assert!(output.contains("Hello World"));
     }
 }

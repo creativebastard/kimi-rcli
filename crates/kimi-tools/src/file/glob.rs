@@ -1,6 +1,6 @@
 //! Glob tool - find files using glob patterns.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::Path;
@@ -23,6 +23,7 @@ fn default_include_dirs() -> bool {
 }
 
 /// Tool for finding files using glob patterns.
+#[derive(Debug)]
 pub struct GlobTool;
 
 impl GlobTool {
@@ -133,7 +134,7 @@ impl Tool for GlobTool {
             matches.join("\n")
         };
 
-        Ok(ToolOutput::new(output))
+        Ok(serde_json::json!(output))
     }
 }
 

@@ -1,6 +1,6 @@
 //! ReadFile tool - reads text content from a file.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::Path;
@@ -19,6 +19,7 @@ pub struct ReadFileParams {
 }
 
 /// Tool for reading files.
+#[derive(Debug)]
 pub struct ReadFileTool;
 
 impl ReadFileTool {
@@ -115,7 +116,7 @@ impl Tool for ReadFileTool {
             content
         };
 
-        Ok(ToolOutput::new(output))
+        Ok(serde_json::json!(output))
     }
 }
 

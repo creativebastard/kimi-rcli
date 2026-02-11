@@ -1,6 +1,6 @@
 //! Grep tool - search file contents using regex.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use regex::Regex;
 use serde::Deserialize;
@@ -65,6 +65,7 @@ struct MatchResult {
 }
 
 /// Tool for searching file contents using regex.
+#[derive(Debug)]
 pub struct GrepTool;
 
 impl GrepTool {
@@ -326,7 +327,7 @@ impl Tool for GrepTool {
             }
         };
 
-        Ok(ToolOutput::new(output))
+        Ok(serde_json::json!(output))
     }
 }
 

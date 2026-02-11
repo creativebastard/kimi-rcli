@@ -1,6 +1,6 @@
 //! WriteFile tool - writes content to a file.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::Path;
@@ -22,6 +22,7 @@ fn default_mode() -> String {
 }
 
 /// Tool for writing files.
+#[derive(Debug)]
 pub struct WriteFileTool;
 
 impl WriteFileTool {
@@ -112,7 +113,10 @@ impl Tool for WriteFileTool {
         }
 
         let message = format!("Successfully wrote {} bytes to {}", params.content.len(), params.path);
-        Ok(ToolOutput::with_message("", message))
+        Ok(serde_json::json!({
+            "output": "",
+            "message": message
+        }))
     }
 }
 

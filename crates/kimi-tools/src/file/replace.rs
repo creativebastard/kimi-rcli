@@ -1,6 +1,6 @@
 //! StrReplaceFile tool - replace strings within a file.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::Path;
@@ -43,6 +43,7 @@ pub enum StrReplaceFileParams {
 }
 
 /// Tool for replacing strings in files.
+#[derive(Debug)]
 pub struct StrReplaceFileTool;
 
 impl StrReplaceFileTool {
@@ -174,7 +175,10 @@ impl Tool for StrReplaceFileTool {
         let message = format!(
             "Successfully made {total_replacements} replacement(s) in {path}"
         );
-        Ok(ToolOutput::with_message("", message))
+        Ok(serde_json::json!({
+            "output": "",
+            "message": message
+        }))
     }
 }
 

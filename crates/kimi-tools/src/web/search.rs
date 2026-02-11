@@ -1,6 +1,6 @@
 //! SearchWeb tool - search the internet for information.
 
-use crate::{Tool, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 
@@ -31,6 +31,7 @@ pub struct SearchResult {
 }
 
 /// Tool for searching the web.
+#[derive(Debug)]
 pub struct SearchWebTool {
     client: reqwest::Client,
     api_endpoint: Option<String>,
@@ -174,7 +175,7 @@ impl Tool for SearchWebTool {
                 .map_err(|e| ToolError::new(format!("Failed to serialize results: {e}")))?
         };
 
-        Ok(ToolOutput::new(output))
+        Ok(serde_json::json!(output))
     }
 }
 
