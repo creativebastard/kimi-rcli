@@ -13,7 +13,7 @@ If you discover a security vulnerability in Kimi RCLI, please report it responsi
 ### How to Report
 
 1. **Do NOT** open a public issue on GitHub
-2. Email the maintainers directly at: [security@example.com] (replace with actual contact)
+2. Email the maintainers directly at: security@pdg-global.com
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
