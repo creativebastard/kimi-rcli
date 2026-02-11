@@ -4,7 +4,7 @@
 //! with support for OAuth token resolution.
 
 use kosong_rs::{ChatProvider, KimiProvider};
-use crate::auth::{load_token, OAuthRef};
+use crate::auth::{load_token, oauth::refresh_token, storage::save_token, OAuthRef};
 use crate::config::{Config, ProviderType};
 use secrecy::ExposeSecret;
 
@@ -53,8 +53,18 @@ pub async fn create_provider(
     
     // Resolve API key (from OAuth or direct)
     let api_key = if let Some(oauth_ref) = &provider_config.oauth {
-        let token = load_token(oauth_ref)
+        let mut token = load_token(oauth_ref)
             .ok_or(LlmError::MissingToken)?;
+        
+        // Check if token needs refresh (expired or about to expire)
+        if token.is_expired() || token.needs_refresh() {
+            tracing::info!("OAuth token expired or needs refresh, refreshing...");
+            token = refresh_token(&token.refresh_token).await
+                .map_err(|e| LlmError::ProviderError(format!("Failed to refresh token: {}", e)))?;
+            // Save the refreshed token
+            save_token(oauth_ref, &token);
+        }
+        
         token.access_token
     } else {
         provider_config.api_key.expose_secret().to_string()
@@ -100,8 +110,18 @@ pub async fn create_provider_for_model(
     
     // Resolve API key (from OAuth or direct)
     let api_key = if let Some(oauth_ref) = &provider_config.oauth {
-        let token = load_token(oauth_ref)
+        let mut token = load_token(oauth_ref)
             .ok_or(LlmError::MissingToken)?;
+        
+        // Check if token needs refresh (expired or about to expire)
+        if token.is_expired() || token.needs_refresh() {
+            tracing::info!("OAuth token expired or needs refresh, refreshing...");
+            token = refresh_token(&token.refresh_token).await
+                .map_err(|e| LlmError::ProviderError(format!("Failed to refresh token: {}", e)))?;
+            // Save the refreshed token
+            save_token(oauth_ref, &token);
+        }
+        
         token.access_token
     } else {
         provider_config.api_key.expose_secret().to_string()

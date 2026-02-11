@@ -101,6 +101,8 @@ struct KimiDelta {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     role: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<ToolCall>>,
@@ -229,6 +231,42 @@ impl KimiProvider {
             .map_err(|e| ChatError::Config(format!("Invalid API key: {}", e)))?;
         headers.insert(AUTHORIZATION, auth_header);
 
+        // User-Agent is critical for Kimi Code API access
+        // Format: KimiCLI/{VERSION}
+        let user_agent = format!("KimiCLI/{}", env!("CARGO_PKG_VERSION"));
+        headers.insert("User-Agent", HeaderValue::from_str(&user_agent).unwrap_or_else(|_| HeaderValue::from_static("KimiCLI/0.1.0")));
+
+        // Add Kimi CLI identification headers for API access
+        headers.insert("X-Msh-Platform", HeaderValue::from_static("kimi_cli"));
+        headers.insert("X-Msh-Version", HeaderValue::from_static(env!("CARGO_PKG_VERSION")));
+        
+        // Device identification headers - use actual system info
+        let hostname = hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| "unknown".to_string());
+        
+        if let Ok(device_name) = HeaderValue::from_str(&hostname) {
+            headers.insert("X-Msh-Device-Name", device_name);
+        }
+        
+        // Device model: OS + Architecture
+        let device_model = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+        if let Ok(device_model_header) = HeaderValue::from_str(&device_model) {
+            headers.insert("X-Msh-Device-Model", device_model_header);
+        }
+        
+        // OS Version
+        if let Ok(os_version) = HeaderValue::from_str(&sysinfo::System::kernel_version().unwrap_or_default()) {
+            headers.insert("X-Msh-Os-Version", os_version);
+        }
+        
+        // Device ID - use the stored device ID
+        let device_id = crate::chat_provider::get_device_id();
+        if let Ok(device_id_header) = HeaderValue::from_str(&device_id) {
+            headers.insert("X-Msh-Device-Id", device_id_header);
+        }
+
         Ok(headers)
     }
 
@@ -286,6 +324,8 @@ impl ChatProvider for KimiProvider {
 
         let url = format!("{}/chat/completions", self.base_url);
 
+        tracing::debug!("Sending request to {}", url);
+
         let response = self
             .client
             .post(&url)
@@ -294,6 +334,8 @@ impl ChatProvider for KimiProvider {
             .send()
             .await
             .map_err(ChatError::Request)?;
+        
+        tracing::debug!("Response status: {}", response.status());
 
         if !response.status().is_success() {
             let status = response.status();
@@ -323,37 +365,70 @@ impl ChatProvider for KimiProvider {
             return Ok(Box::pin(stream));
         }
 
-        // Handle streaming response
-        let stream = response.bytes_stream().filter_map(|chunk| async move {
-            match chunk {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    // Parse SSE format: data: {...}
-                    for line in text.lines() {
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
+        // Handle streaming response with proper SSE parsing
+        tracing::trace!("Processing streaming response...");
+        
+        // Use unfold to maintain state (buffer) across chunks
+        let stream = futures::stream::unfold(
+            (response.bytes_stream(), String::new()),
+            |(mut byte_stream, mut buffer)| async move {
+                loop {
+                    // Try to process any complete lines in the buffer first
+                    if let Some(newline_pos) = buffer.find('\n') {
+                        let line = buffer.drain(..=newline_pos).collect::<String>();
+                        let line = line.trim_end();
+                        
+                        tracing::trace!("Processing line: {}", line);
+                        
+                        if line.starts_with("data:") {
+                            let data = line[5..].trim_start();
                             if data == "[DONE]" {
-                                return None;
+                                tracing::debug!("Received [DONE]");
+                                return None; // End of stream
                             }
+                            
+                            tracing::trace!("Parsing JSON chunk");
                             match serde_json::from_str::<KimiStreamChunk>(data) {
                                 Ok(chunk) => {
                                     if let Some(choice) = chunk.choices.into_iter().next() {
                                         if let Some(content) = choice.delta.content {
-                                            return Some(Ok(content));
+                                            if !content.is_empty() {
+                                                return Some((Ok(content), (byte_stream, buffer)));
+                                            }
                                         }
+                                        // Skip reasoning_content for now
                                     }
                                 }
                                 Err(e) => {
-                                    return Some(Err(ChatError::Parse(e.to_string())));
+                                    tracing::warn!("Failed to parse chunk: {}", e);
+                                    // Continue to next line on parse error
                                 }
                             }
                         }
+                        // Continue to process more lines
+                        continue;
                     }
-                    None
+                    
+                    // No complete line in buffer, fetch more data
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let text = String::from_utf8_lossy(&bytes);
+                            tracing::trace!("Received bytes: {}", text);
+                            buffer.push_str(&text);
+                            // Continue the loop to try processing again
+                        }
+                        Some(Err(e)) => {
+                            tracing::error!("Stream error: {}", e);
+                            return Some((Err(ChatError::Request(e)), (byte_stream, buffer)));
+                        }
+                        None => {
+                            // End of byte stream
+                            return None;
+                        }
+                    }
                 }
-                Err(e) => Some(Err(ChatError::Request(e))),
             }
-        });
+        );
 
         Ok(Box::pin(stream))
     }

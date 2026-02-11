@@ -348,7 +348,7 @@ impl ShellUI {
             }
 
             // Authentication commands
-            "/login" | "/setup" => {
+            "/login" => {
                 if let Err(e) = crate::commands::login::execute(true).await {
                     eprintln!("{} {}", 
                         Style::new().fg(Color::Red).paint("Login failed:"),
@@ -361,6 +361,31 @@ impl ShellUI {
                             self.config = new_config;
                             println!("{}", 
                                 Style::new().fg(Color::Green).paint("Config reloaded successfully!")
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("{} {}", 
+                                Style::new().fg(Color::Yellow).paint("Warning: Failed to reload config:"),
+                                e
+                            );
+                        }
+                    }
+                }
+                Ok(true)
+            }
+            "/setup" => {
+                if let Err(e) = crate::commands::setup::execute().await {
+                    eprintln!("{} {}", 
+                        Style::new().fg(Color::Red).paint("Setup failed:"),
+                        e
+                    );
+                } else {
+                    // Reload config after successful setup
+                    match load_config(None) {
+                        Ok(new_config) => {
+                            self.config = new_config;
+                            println!("{}", 
+                                Style::new().fg(Color::Green).paint("Setup complete! Config reloaded successfully!")
                             );
                         }
                         Err(e) => {
@@ -730,7 +755,8 @@ impl ShellUI {
         println!("  {} - Set or show current session", Style::new().fg(Color::Green).paint("/session [name]"));
         
         println!("\n{}", Style::new().bold().fg(Color::Yellow).paint("Authentication:"));
-        println!("  {} - Login to Kimi (OAuth)", Style::new().fg(Color::Green).paint("/login, /setup"));
+        println!("  {} - Login to Kimi (OAuth device flow)", Style::new().fg(Color::Green).paint("/login"));
+        println!("  {} - Setup wizard (choose provider, enter API key)", Style::new().fg(Color::Green).paint("/setup"));
         println!("  {} - Logout from Kimi", Style::new().fg(Color::Green).paint("/logout"));
         
         println!("\n{}", Style::new().bold().fg(Color::Yellow).paint("Context:"));

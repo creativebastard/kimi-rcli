@@ -516,7 +516,7 @@ fn apply_kimi_code_config(
             .collect();
 
         let model = LlmModel {
-            name: managed_model_key(&platform.id, &model_info.id),
+            name: model_info.id.clone(),  // Use the actual model ID, not the managed key
             provider: provider_key.clone(),
             max_tokens: Some(model_info.context_length),
             temperature: None,

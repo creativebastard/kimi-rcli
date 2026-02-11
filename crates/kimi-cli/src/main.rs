@@ -31,6 +31,10 @@ async fn run() -> Result<()> {
                 kimi_cli::commands::login::execute(true).await?;
                 return Ok(());
             }
+            Commands::Setup => {
+                kimi_cli::commands::setup::execute().await?;
+                return Ok(());
+            }
             Commands::Mcp { subcommand } => {
                 kimi_cli::commands::mcp::execute(subcommand).await?;
                 return Ok(());

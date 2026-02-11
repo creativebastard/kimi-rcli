@@ -287,6 +287,45 @@ impl ResponseFormat {
     }
 }
 
+/// Get a unique device ID for this installation.
+/// 
+/// This generates a persistent device ID that is stored in the user's data directory.
+/// The device ID is used for API authentication and tracking.
+pub fn get_device_id() -> String {
+    use std::fs;
+    use std::path::PathBuf;
+    
+    // Try to get the data directory
+    let data_dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("kimi");
+    
+    let device_id_file = data_dir.join("device_id");
+    
+    // Try to read existing device ID
+    if let Ok(existing) = fs::read_to_string(&device_id_file) {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    
+    // Generate a new device ID (32 hex characters, no dashes)
+    let new_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+    
+    // Try to save it
+    if let Err(e) = fs::create_dir_all(&data_dir) {
+        eprintln!("Warning: Failed to create data directory: {}", e);
+        return new_id;
+    }
+    
+    if let Err(e) = fs::write(&device_id_file, &new_id) {
+        eprintln!("Warning: Failed to save device ID: {}", e);
+    }
+    
+    new_id
+}
+
 pub mod kimi;
 pub mod openai;
 

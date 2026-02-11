@@ -45,5 +45,8 @@ uuid = { workspace = true }
 # Browser opener for OAuth
 open = "5"
 
+# Secrets handling
+secrecy = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -58,6 +58,9 @@ dirs = "6.0"
 which = "7.0"
 tempfile = "3.16"
 
+# Secrets
+secrecy = { version = "0.8", features = ["serde"] }
+
 # Workspace crates
 kosong-rs = { path = "crates/kosong-rs" }
 kaos-rs = { path = "crates/kaos-rs" }

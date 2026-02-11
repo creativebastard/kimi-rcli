@@ -60,8 +60,10 @@ pub struct Cli {
 /// Available subcommands
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Authenticate with Kimi API
+    /// Authenticate with Kimi API (OAuth flow)
     Login,
+    /// Interactive setup wizard for configuring providers
+    Setup,
     /// Manage MCP (Model Context Protocol) servers
     Mcp {
         #[command(subcommand)]
