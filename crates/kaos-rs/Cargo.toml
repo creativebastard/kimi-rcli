@@ -1,0 +1,21 @@
+[package]
+name = "kaos-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <you@example.com>"]
+description = "OS abstraction layer for async file operations and command execution"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/kaos-rs"
+keywords = ["async", "filesystem", "process", "os", "abstraction"]
+categories = ["asynchronous", "filesystem", "os"]
+rust-version = "1.75"
+
+[dependencies]
+tokio = { version = "1.35", features = ["fs", "process", "io-util", "rt", "macros"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.9"

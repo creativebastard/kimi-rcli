@@ -1,0 +1,20 @@
+Kimi RCLI
+Copyright 2024-2025 Kimi RCLI Contributors
+
+This product is a community port of the original kimi-cli by Moonshot AI.
+
+Original work:
+  kimi-cli
+  Copyright 2024 Moonshot AI
+  https://github.com/MoonshotAI/kimi-cli
+
+This product includes software developed by the Rust community
+and licensed under various open source licenses.
+
+Third-party dependencies:
+- tokio: MIT License
+- serde: MIT/Apache-2.0 License
+- clap: MIT/Apache-2.0 License
+- reqwest: MIT/Apache-2.0 License
+- reedline: MIT License
+- and others (see Cargo.toml for full list)

@@ -1,0 +1,32 @@
+[package]
+name = "kimi-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+secrecy = { version = "0.8", features = ["serde"] }
+dirs = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+hostname = "0.4"
+sysinfo = "0.33"
+
+# Workspace dependencies
+kosong-rs = { path = "../kosong-rs" }
+kaos-rs = { path = "../kaos-rs" }
+
+[dev-dependencies]
+tokio-test = "0.4"
