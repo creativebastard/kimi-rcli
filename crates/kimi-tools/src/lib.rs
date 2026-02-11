@@ -5,6 +5,7 @@
 
 pub mod file;
 pub mod shell;
+pub mod task;
 pub mod todo;
 pub mod web;
 
@@ -14,6 +15,7 @@ pub use kimi_core::{Tool, ToolError, ToolResult};
 // Re-export all tools
 pub use file::{GlobTool, GrepTool, ReadFileTool, StrReplaceFileTool, WriteFileTool};
 pub use shell::ShellTool;
+pub use task::{TaskTool, Subagent};
 pub use todo::SetTodoListTool;
 pub use web::{FetchURLTool, SearchWebTool};
 
