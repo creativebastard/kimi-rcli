@@ -141,6 +141,55 @@ impl KimiSoul {
         }
     }
 
+    /// Create a new KimiSoul instance with default tools registered
+    pub fn with_tools(
+        agent: Agent,
+        context: Context,
+        approval: Arc<Approval>,
+        denwa_renji: Arc<DenwaRenji>,
+        loop_control: LoopControl,
+        compaction: SimpleCompaction,
+        tools: Vec<std::sync::Arc<dyn super::Tool>>,
+    ) -> Self {
+        let mut soul = Self::new(
+            agent,
+            context,
+            approval,
+            denwa_renji,
+            loop_control,
+            compaction,
+        );
+        
+        // Register all provided tools
+        for tool in tools {
+            soul.toolset.register(tool);
+        }
+        
+        soul
+    }
+
+    /// Register a tool with the soul
+    pub fn register_tool(&mut self, tool: std::sync::Arc<dyn super::Tool>) {
+        self.toolset.register(tool);
+    }
+
+    /// Register multiple tools with the soul
+    pub fn register_tools(&mut self, tools: Vec<std::sync::Arc<dyn super::Tool>>) {
+        for tool in tools {
+            self.toolset.register(tool);
+        }
+    }
+
+    /// Get the toolset
+    pub fn toolset(&self) -> &KimiToolset {
+        &self.toolset
+    }
+
+    /// Get the toolset mutably
+    pub fn toolset_mut(&mut self) -> &mut KimiToolset {
+        &mut self.toolset
+    }
+
     /// Run a complete turn with user input
     pub async fn run(
         &mut self,

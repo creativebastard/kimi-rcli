@@ -17,6 +17,11 @@ use kimi_core::{
     soul::{KimiSoul, SoulError, Agent, SimpleCompaction},
     types::LoopControl,
 };
+use kimi_tools::{
+    ReadFileTool, WriteFileTool, StrReplaceFileTool,
+    ShellTool, GlobTool, GrepTool, SetTodoListTool,
+    TaskTool, FetchURLTool, SearchWebTool,
+};
 
 use crate::cli::Cli;
 use crate::ui::{ShellUI, PrintUI, UIError};
@@ -114,6 +119,22 @@ impl App {
         Ok(())
     }
 
+    /// Create the default set of tools
+    fn create_default_tools() -> Vec<std::sync::Arc<dyn kimi_core::soul::Tool>> {
+        vec![
+            std::sync::Arc::new(ReadFileTool::new()),
+            std::sync::Arc::new(WriteFileTool::new()),
+            std::sync::Arc::new(StrReplaceFileTool::new()),
+            std::sync::Arc::new(ShellTool::new()),
+            std::sync::Arc::new(GlobTool::new()),
+            std::sync::Arc::new(GrepTool::new()),
+            std::sync::Arc::new(SetTodoListTool::new()),
+            std::sync::Arc::new(TaskTool::new()),
+            std::sync::Arc::new(FetchURLTool::new()),
+            std::sync::Arc::new(SearchWebTool::new()),
+        ]
+    }
+
     /// Run the interactive shell mode
     pub async fn run_shell(mut self) -> Result<(), AppError> {
         info!("Starting shell mode");
@@ -123,19 +144,21 @@ impl App {
             self.initialize().await?;
         }
 
-        // Create KimiSoul
+        // Create KimiSoul with tools
         let agent = self.agent.take().unwrap();
         let denwa_renji = Arc::new(kimi_core::soul::DenwaRenji::new());
         let loop_control = self.config.loop_control.clone();
         let compaction = SimpleCompaction::new(4000);
+        let tools = Self::create_default_tools();
         
-        let mut soul = KimiSoul::new(
+        let mut soul = KimiSoul::with_tools(
             agent,
             self.context,
             self.approval.clone(),
             denwa_renji,
             loop_control,
             compaction,
+            tools,
         );
 
         // Create and run shell UI
@@ -154,19 +177,21 @@ impl App {
             self.initialize().await?;
         }
 
-        // Create KimiSoul
+        // Create KimiSoul with tools
         let agent = self.agent.take().unwrap();
         let denwa_renji = Arc::new(kimi_core::soul::DenwaRenji::new());
         let loop_control = self.config.loop_control.clone();
         let compaction = SimpleCompaction::new(4000);
+        let tools = Self::create_default_tools();
         
-        let mut soul = KimiSoul::new(
+        let mut soul = KimiSoul::with_tools(
             agent,
             self.context,
             self.approval.clone(),
             denwa_renji,
             loop_control,
             compaction,
+            tools,
         );
 
         // Create and run print UI
@@ -185,19 +210,21 @@ impl App {
             self.initialize().await?;
         }
 
-        // Create KimiSoul
+        // Create KimiSoul with tools
         let agent = self.agent.take().unwrap();
         let denwa_renji = Arc::new(kimi_core::soul::DenwaRenji::new());
         let loop_control = self.config.loop_control.clone();
         let compaction = SimpleCompaction::new(4000);
+        let tools = Self::create_default_tools();
         
-        let mut soul = KimiSoul::new(
+        let mut soul = KimiSoul::with_tools(
             agent,
             self.context,
             self.approval.clone(),
             denwa_renji,
             loop_control,
             compaction,
+            tools,
         );
 
         // If there's a prompt, run print mode; otherwise, run shell mode
