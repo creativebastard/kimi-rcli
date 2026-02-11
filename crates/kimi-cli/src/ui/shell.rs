@@ -353,6 +353,22 @@ impl ShellUI {
                         Style::new().fg(Color::Red).paint("Login failed:"),
                         e
                     );
+                } else {
+                    // Reload config after successful login
+                    match load_config(None) {
+                        Ok(new_config) => {
+                            self.config = new_config;
+                            println!("{}", 
+                                Style::new().fg(Color::Green).paint("Config reloaded successfully!")
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("{} {}", 
+                                Style::new().fg(Color::Yellow).paint("Warning: Failed to reload config:"),
+                                e
+                            );
+                        }
+                    }
                 }
                 Ok(true)
             }
@@ -362,6 +378,22 @@ impl ShellUI {
                         Style::new().fg(Color::Red).paint("Logout failed:"),
                         e
                     );
+                } else {
+                    // Reload config after logout
+                    match load_config(None) {
+                        Ok(new_config) => {
+                            self.config = new_config;
+                            println!("{}", 
+                                Style::new().fg(Color::Green).paint("Logged out and config reloaded.")
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("{} {}", 
+                                Style::new().fg(Color::Yellow).paint("Warning: Failed to reload config:"),
+                                e
+                            );
+                        }
+                    }
                 }
                 Ok(true)
             }
