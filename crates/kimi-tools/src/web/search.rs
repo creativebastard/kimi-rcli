@@ -34,7 +34,9 @@ pub struct SearchResult {
 #[derive(Debug)]
 pub struct SearchWebTool {
     client: reqwest::Client,
+    #[allow(dead_code)]
     api_endpoint: Option<String>,
+    #[allow(dead_code)]
     api_key: Option<String>,
 }
 

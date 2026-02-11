@@ -81,6 +81,7 @@ struct KimiResponse {
 #[derive(Debug, Deserialize)]
 struct KimiChoice {
     message: KimiMessage,
+    #[allow(dead_code)]
     finish_reason: Option<String>,
 }
 
@@ -94,6 +95,7 @@ struct KimiStreamChunk {
 #[derive(Debug, Deserialize)]
 struct KimiStreamChoice {
     delta: KimiDelta,
+    #[allow(dead_code)]
     finish_reason: Option<String>,
 }
 
@@ -103,10 +105,13 @@ struct KimiDelta {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     reasoning_content: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     role: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     tool_calls: Option<Vec<ToolCall>>,
 }
 

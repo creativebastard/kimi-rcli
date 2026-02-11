@@ -1,13 +1,12 @@
 [package]
 name = "kosong-rs"
-version = "0.1.0"
-edition = "2021"
-authors = ["Kimi CLI Team"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "An LLM abstraction layer for AI agent applications"
-license = "MIT"
-repository = "https://github.com/moonshot-ai/kimi-rcli"
-keywords = ["llm", "ai", "chat", "kimi", "openai"]
-categories = ["api-bindings", "asynchronous", "web-programming"]
 
 [dependencies]
 async-trait = "0.1"

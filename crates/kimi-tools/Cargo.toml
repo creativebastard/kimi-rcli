@@ -1,8 +1,11 @@
 [package]
 name = "kimi-tools"
-version = "0.1.0"
-edition = "2021"
-authors = ["Kimi Team"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Built-in tools for the Kimi CLI agent"
 
 [dependencies]
