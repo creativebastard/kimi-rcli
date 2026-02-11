@@ -5,7 +5,7 @@
 use crate::chat_provider::{
     ChatError, ChatOptions, ChatProvider, GenerateStream, StreamChunk, ModelCapability, ThinkingEffort,
 };
-use crate::message::{Message, ToolCall};
+use crate::message::{Message, ToolCall, ToolCallPart};
 use async_trait::async_trait;
 use futures::{stream, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -112,7 +112,7 @@ struct KimiDelta {
     role: Option<String>,
     #[serde(default)]
     #[allow(dead_code)]
-    tool_calls: Option<Vec<ToolCall>>,
+    tool_calls: Option<Vec<ToolCallPart>>,
 }
 
 impl KimiProvider {
@@ -389,10 +389,15 @@ impl ChatProvider for KimiProvider {
         // Handle streaming response with proper SSE parsing
         tracing::trace!("Processing streaming response...");
         
-        // Use unfold to maintain state (buffer) across chunks
+        // Use unfold to maintain state (buffer and pending tool calls) across chunks
         let stream = futures::stream::unfold(
-            (response.bytes_stream(), String::new()),
-            |(mut byte_stream, mut buffer)| async move {
+            (response.bytes_stream(), String::new(), std::collections::HashMap::<String, ToolCallPart>::new(), None::<ToolCall>),
+            |(mut byte_stream, mut buffer, mut pending_tool_calls, complete_tool_call)| async move {
+                // First, return any complete tool call we have queued
+                if let Some(tool_call) = complete_tool_call {
+                    return Some((Ok(StreamChunk::ToolCall(tool_call)), (byte_stream, buffer, pending_tool_calls, None)));
+                }
+                
                 loop {
                     // Try to process any complete lines in the buffer first
                     if let Some(newline_pos) = buffer.find('\n') {
@@ -405,6 +410,14 @@ impl ChatProvider for KimiProvider {
                             let data = line[5..].trim_start();
                             if data == "[DONE]" {
                                 tracing::debug!("Received [DONE]");
+                                // Try to return one complete tool call, or end stream
+                                for (id, part) in pending_tool_calls.iter() {
+                                    if let Some(tool_call) = part.to_tool_call() {
+                                        let id = id.clone();
+                                        pending_tool_calls.remove(&id);
+                                        return Some((Ok(StreamChunk::ToolCall(tool_call)), (byte_stream, buffer, pending_tool_calls, None)));
+                                    }
+                                }
                                 return None; // End of stream
                             }
                             
@@ -413,16 +426,42 @@ impl ChatProvider for KimiProvider {
                                 Ok(chunk) => {
                                     if let Some(choice) = chunk.choices.into_iter().next() {
                                         // Check for tool_calls first
-                                        if let Some(tool_calls) = choice.delta.tool_calls {
-                                            // Return the first tool call as a chunk
-                                            if let Some(tool_call) = tool_calls.into_iter().next() {
-                                                return Some((Ok(StreamChunk::ToolCall(tool_call)), (byte_stream, buffer)));
+                                        if let Some(tool_call_parts) = choice.delta.tool_calls {
+                                            for part in tool_call_parts {
+                                                let id = part.id.clone();
+                                                
+                                                // Check if this is a new tool call or an update
+                                                if let Some(existing) = pending_tool_calls.get_mut(&id) {
+                                                    // Merge the new part into the existing one
+                                                    existing.merge(&part);
+                                                    
+                                                    // Check if it's now complete
+                                                    if let Some(tool_call) = existing.to_tool_call() {
+                                                        pending_tool_calls.remove(&id);
+                                                        // Queue any other complete tool calls for next iteration
+                                                        let mut next_complete = None;
+                                                        for (other_id, other_part) in pending_tool_calls.iter() {
+                                                            if let Some(tc) = other_part.to_tool_call() {
+                                                                next_complete = Some(tc);
+                                                                let oid = other_id.clone();
+                                                                pending_tool_calls.remove(&oid);
+                                                                break;
+                                                            }
+                                                        }
+                                                        return Some((Ok(StreamChunk::ToolCall(tool_call)), (byte_stream, buffer, pending_tool_calls, next_complete)));
+                                                    }
+                                                } else {
+                                                    // New tool call part
+                                                    pending_tool_calls.insert(id, part);
+                                                }
                                             }
+                                            // Continue to process more data
+                                            continue;
                                         }
                                         // Check for content
                                         if let Some(content) = choice.delta.content {
                                             if !content.is_empty() {
-                                                return Some((Ok(StreamChunk::Text(content)), (byte_stream, buffer)));
+                                                return Some((Ok(StreamChunk::Text(content)), (byte_stream, buffer, pending_tool_calls, None)));
                                             }
                                         }
                                         // Skip reasoning_content for now
@@ -448,10 +487,17 @@ impl ChatProvider for KimiProvider {
                         }
                         Some(Err(e)) => {
                             tracing::error!("Stream error: {}", e);
-                            return Some((Err(ChatError::Request(e)), (byte_stream, buffer)));
+                            return Some((Err(ChatError::Request(e)), (byte_stream, buffer, pending_tool_calls, None)));
                         }
                         None => {
-                            // End of byte stream
+                            // End of byte stream - return any remaining complete tool calls
+                            for (id, part) in pending_tool_calls.iter() {
+                                if let Some(tool_call) = part.to_tool_call() {
+                                    let id = id.clone();
+                                    pending_tool_calls.remove(&id);
+                                    return Some((Ok(StreamChunk::ToolCall(tool_call)), (byte_stream, buffer, pending_tool_calls, None)));
+                                }
+                            }
                             return None;
                         }
                     }

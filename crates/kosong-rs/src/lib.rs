@@ -30,6 +30,7 @@
 //!     match chunk? {
 //!         StreamChunk::Text(text) => print!("{}", text),
 //!         StreamChunk::ToolCall(tool_call) => println!("Tool call: {:?}", tool_call),
+//!         StreamChunk::ToolCallPart(_) => {}, // Parts are accumulated by the provider
 //!     }
 //! }
 //! # Ok(())
@@ -44,7 +45,7 @@ pub mod tooling;
 pub use chat_provider::{ChatProvider, ChatError, GenerateStream, StreamChunk, ModelCapability, ThinkingEffort};
 pub use chat_provider::kimi::KimiProvider;
 pub use chat_provider::openai::OpenAiProvider;
-pub use message::{ContentPart, Message, Role, ToolCall, ToolResult};
+pub use message::{ContentPart, Message, Role, ToolCall, ToolCallPart, ToolResult};
 pub use tooling::{Tool, Toolset, ToolError as ToolingError};
 
 // Re-export async_trait for users implementing custom providers

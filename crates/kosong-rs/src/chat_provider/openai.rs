@@ -20,6 +20,7 @@
 //!     match chunk? {
 //!         StreamChunk::Text(text) => print!("{}", text),
 //!         StreamChunk::ToolCall(tool_call) => println!("Tool call: {:?}", tool_call),
+//!         StreamChunk::ToolCallPart(_) => {}, // Parts are accumulated by the provider
 //!     }
 //! }
 //! # Ok(())

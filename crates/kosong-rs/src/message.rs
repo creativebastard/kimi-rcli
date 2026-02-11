@@ -369,6 +369,99 @@ impl FunctionCall {
     }
 }
 
+/// A partial function call for streaming.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct FunctionCallPart {
+    /// The name of the function (if available).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A partial chunk of the arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
+}
+
+/// A partial tool call for streaming.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCallPart {
+    /// The unique identifier for this tool call.
+    pub id: String,
+    /// The type of the tool call (typically "function").
+    #[serde(rename = "type")]
+    pub call_type: String,
+    /// The partial function call.
+    pub function: FunctionCallPart,
+    /// Index for ordering in streaming responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+impl ToolCallPart {
+    /// Creates a new tool call part.
+    pub fn new<S: Into<String>>(id: S, call_type: S) -> Self {
+        Self {
+            id: id.into(),
+            call_type: call_type.into(),
+            function: FunctionCallPart::default(),
+            index: None,
+        }
+    }
+
+    /// Sets the function name.
+    pub fn with_name<S: Into<String>>(mut self, name: S) -> Self {
+        self.function.name = Some(name.into());
+        self
+    }
+
+    /// Sets the function arguments.
+    pub fn with_arguments<S: Into<String>>(mut self, args: S) -> Self {
+        self.function.arguments = Some(args.into());
+        self
+    }
+
+    /// Sets the index.
+    pub fn with_index(mut self, index: usize) -> Self {
+        self.index = Some(index);
+        self
+    }
+
+    /// Merges another part into this one, accumulating arguments.
+    pub fn merge(&mut self, other: &ToolCallPart) {
+        if let Some(ref name) = other.function.name {
+            self.function.name = Some(name.clone());
+        }
+        if let Some(ref args) = other.function.arguments {
+            if let Some(ref mut existing) = self.function.arguments {
+                existing.push_str(args);
+            } else {
+                self.function.arguments = Some(args.clone());
+            }
+        }
+    }
+
+    /// Checks if this part has a complete function call.
+    pub fn is_complete(&self) -> bool {
+        self.function.name.is_some() && 
+        self.function.arguments.is_some() && 
+        !self.function.arguments.as_ref().unwrap().is_empty()
+    }
+
+    /// Converts this part to a complete ToolCall if complete.
+    pub fn to_tool_call(&self) -> Option<ToolCall> {
+        if self.is_complete() {
+            Some(ToolCall {
+                id: self.id.clone(),
+                call_type: self.call_type.clone(),
+                function: FunctionCall {
+                    name: self.function.name.clone().unwrap_or_default(),
+                    arguments: self.function.arguments.clone().unwrap_or_default(),
+                },
+            })
+        } else {
+            None
+        }
+    }
+}
+
 /// The result of a tool execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {

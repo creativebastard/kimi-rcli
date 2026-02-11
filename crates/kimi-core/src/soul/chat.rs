@@ -99,6 +99,11 @@ async fn process_single_turn(
                 debug!("Received tool call: {:?}", tool_call);
                 pending_tool_calls.push(tool_call);
             }
+            Ok(kosong_rs::StreamChunk::ToolCallPart(_part)) => {
+                // Tool call parts are accumulated by the provider
+                // We only receive complete ToolCalls, so we can ignore parts here
+                debug!("Received tool call part (accumulated by provider)");
+            }
             Err(e) => {
                 return Err(SoulError::Llm(e.to_string()));
             }
