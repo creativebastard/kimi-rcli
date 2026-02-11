@@ -19,7 +19,7 @@
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let provider = KimiProvider::new("your-api-key", "kimi-k2-0711-preview")?;
+//! let provider = KimiProvider::new("your-api-key", "kimi-k2-0711-preview", None::<&str>)?;
 //!
 //! let messages = vec![
 //!     Message::new(Role::User, "Hello, how are you?"),

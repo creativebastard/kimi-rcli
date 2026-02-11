@@ -9,6 +9,7 @@
 //! - Slash commands: User command handling
 
 pub mod agent;
+pub mod chat;
 pub mod compaction;
 pub mod denwarenji;
 pub mod kimisoul;
@@ -23,20 +24,40 @@ pub use slash::{SlashCommand, SlashCommandRegistry};
 pub use toolset::{KimiToolset, Tool, ToolError, ToolResult, McpServerInfo, ToolCall, ToolCallResult};
 
 use crate::types::{Message, Role};
+use crate::wire::WireMessage;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// Wire protocol for soul-side communication
+/// 
+/// This struct holds an optional mpsc sender for sending wire messages.
+/// When no sender is configured, messages are silently dropped.
 #[derive(Debug, Clone)]
-pub struct WireSoulSide;
+pub struct WireSoulSide {
+    sender: Option<Arc<mpsc::Sender<WireMessage>>>,
+}
 
 impl WireSoulSide {
-    /// Create a new wire for soul-side communication
+    /// Create a new wire for soul-side communication with no sender
     pub fn new() -> Self {
-        Self
+        Self {
+            sender: None,
+        }
+    }
+
+    /// Create a new wire with an mpsc sender
+    pub fn with_sender(sender: mpsc::Sender<WireMessage>) -> Self {
+        Self {
+            sender: Some(Arc::new(sender)),
+        }
     }
 
     /// Send a message through the wire
-    pub async fn send(&self, _message: crate::wire::WireMessage) -> Result<(), SoulError> {
-        // TODO: Implement actual wire communication
+    pub async fn send(&self, message: WireMessage) -> Result<(), SoulError> {
+        if let Some(sender) = &self.sender {
+            sender.send(message).await
+                .map_err(|e| SoulError::Wire(format!("Failed to send message: {}", e)))?;
+        }
         Ok(())
     }
 }

@@ -15,11 +15,13 @@ use crate::wire::WireMessage;
 
 // Import from sibling modules directly to avoid circular dependencies
 use super::agent::Agent;
+use super::chat;
 use super::compaction::{Compaction, SimpleCompaction};
 use super::denwarenji::DenwaRenji;
 use super::slash::{parse_slash_command, SlashCommandRegistry};
 use super::toolset::{KimiToolset, ToolCall, ToolCallResult};
 use super::{user_message, WireSoulSide};
+use kosong_rs::ChatProvider;
 use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
@@ -461,6 +463,16 @@ impl KimiSoul {
     /// Check if the loop should stop
     pub fn should_stop(&self) -> bool {
         self.should_stop
+    }
+
+    /// Process a message with the LLM provider
+    pub async fn process_with_llm(
+        &self,
+        provider: &dyn ChatProvider,
+        user_input: UserInput,
+        wire: &WireSoulSide,
+    ) -> Result<String, SoulError> {
+        chat::process_message(self, provider, user_input, wire).await
     }
 }
 

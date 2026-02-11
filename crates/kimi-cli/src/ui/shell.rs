@@ -8,15 +8,16 @@ use reedline::{
     ValidationResult, Validator, StyledText,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use kimi_core::{
     ApprovalKind,
-    soul::{KimiSoul, SoulError, Compaction},
+    soul::{KimiSoul, Compaction},
     types::UserInput,
     wire::WireMessage,
     Session,
     config::{load_config, save_config, Config},
+    llm::{self, LlmError},
 };
 
 use crate::cli::Cli;
@@ -527,11 +528,48 @@ impl ShellUI {
     async fn process_message_with_soul(
         &mut self,
         message: &str,
-        _soul: &mut KimiSoul,
+        soul: &mut KimiSoul,
     ) -> UIResult<()> {
+        // Check if a model is configured
+        if self.config.default_model.is_empty() || self.config.models.is_empty() {
+            println!("\n{}", 
+                Style::new().fg(Color::Yellow).paint("No model configured.")
+            );
+            println!("{}", 
+                Style::new().fg(Color::DarkGray).paint("Use /login to authenticate and set up a model.")
+            );
+            return Ok(());
+        }
+
+        // Create LLM provider from config
+        let provider = match llm::create_provider(&self.config).await {
+            Ok(provider) => provider,
+            Err(LlmError::NoProvider) => {
+                println!("\n{}", 
+                    Style::new().fg(Color::Yellow).paint("No provider configured.")
+                );
+                println!("{}", 
+                    Style::new().fg(Color::DarkGray).paint("Use /login to authenticate and set up a model.")
+                );
+                return Ok(());
+            }
+            Err(LlmError::MissingToken) => {
+                println!("\n{}", 
+                    Style::new().fg(Color::Yellow).paint("Authentication token not found.")
+                );
+                println!("{}", 
+                    Style::new().fg(Color::DarkGray).paint("Use /login to authenticate.")
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(UIError::Core(format!("Failed to create LLM provider: {}", e)));
+            }
+        };
+
         // Create channels for wire communication
         let (ui_tx, mut ui_rx) = mpsc::channel::<WireMessage>(100);
-        let (approval_tx, mut approval_rx) = mpsc::channel::<(WireMessage, mpsc::Sender<ApprovalKind>)>(10);
+        let (_approval_tx, mut approval_rx) = mpsc::channel::<(WireMessage, mpsc::Sender<ApprovalKind>)>(10);
 
         // Create user input
         let user_input = UserInput {
@@ -539,29 +577,39 @@ impl ShellUI {
             attachments: vec![],
         };
 
-        // Spawn the soul processing in a separate task
-        let soul_handle = tokio::spawn({
-            let user_input = user_input.clone();
-            async move {
-                // TODO: In the actual implementation, we would pass the wire channels to the soul
-                // For now, simulate the soul processing
-                simulate_soul_processing(user_input, ui_tx, approval_tx).await
-            }
-        });
+        // Create wire soul side that sends to our mpsc channel
+        let wire_soul = kimi_core::soul::WireSoulSide::with_sender(ui_tx.clone());
 
-        // Run the UI loop to display responses
-        self.run_ui_loop(&mut ui_rx, &mut approval_rx).await?;
+        // Send turn begin
+        let _ = ui_tx.send(WireMessage::TurnBegin { 
+            user_input: user_input.clone() 
+        }).await;
 
-        // Wait for soul to complete
-        match soul_handle.await {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => {
-                warn!("Soul processing error: {}", e);
-                return Err(UIError::Core(e.to_string()));
+        // Run LLM processing and UI loop concurrently
+        // The LLM processing future sends messages through the wire
+        let llm_future = async {
+            match soul.process_with_llm(provider.as_ref(), user_input, &wire_soul).await {
+                Ok(_) => {
+                    let _ = ui_tx.send(WireMessage::TurnEnd).await;
+                    Ok(())
+                }
+                Err(e) => {
+                    let _ = ui_tx.send(WireMessage::TextPart { 
+                        text: format!("Error: {}", e) 
+                    }).await;
+                    let _ = ui_tx.send(WireMessage::TurnEnd).await;
+                    Err(UIError::Core(e.to_string()))
+                }
             }
-            Err(e) => {
-                warn!("Soul task panicked: {}", e);
-                return Err(UIError::Core(format!("Soul task panicked: {}", e)));
+        };
+
+        // Run both futures concurrently
+        tokio::select! {
+            result = llm_future => {
+                result?;
+            }
+            result = self.run_ui_loop(&mut ui_rx, &mut approval_rx) => {
+                result?;
             }
         }
 
@@ -810,35 +858,7 @@ impl ShellUI {
     }
 }
 
-/// Simulate soul processing (placeholder until full integration)
-async fn simulate_soul_processing(
-    user_input: UserInput,
-    ui_tx: mpsc::Sender<WireMessage>,
-    _approval_tx: mpsc::Sender<(WireMessage, mpsc::Sender<ApprovalKind>)>,
-) -> Result<(), SoulError> {
-    // Send turn begin
-    let _ = ui_tx.send(WireMessage::TurnBegin { user_input: user_input.clone() }).await;
-    
-    // Simulate processing delay
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    
-    // Send step begin
-    let _ = ui_tx.send(WireMessage::StepBegin { n: 1 }).await;
-    
-    // Simulate text response
-    let response = format!("I received your message: '{}'", user_input.text);
-    for word in response.split_whitespace() {
-        let _ = ui_tx.send(WireMessage::TextPart { 
-            text: format!("{} ", word) 
-        }).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-    }
-    
-    // Send turn end
-    let _ = ui_tx.send(WireMessage::TurnEnd).await;
-    
-    Ok(())
-}
+
 
 #[async_trait::async_trait]
 impl UI for ShellUI {

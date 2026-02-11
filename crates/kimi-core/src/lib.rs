@@ -4,6 +4,7 @@ pub mod approval;
 pub mod auth;
 pub mod config;
 pub mod context;
+pub mod llm;
 pub mod session;
 pub mod skill;
 pub mod soul;

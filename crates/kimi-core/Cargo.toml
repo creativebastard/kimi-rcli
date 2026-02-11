@@ -23,6 +23,7 @@ async-trait = { workspace = true }
 reqwest = { workspace = true }
 hostname = "0.4"
 sysinfo = "0.33"
+futures = "0.3"
 
 # Workspace dependencies
 kosong-rs = { path = "../kosong-rs" }
