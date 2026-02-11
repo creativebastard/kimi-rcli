@@ -271,6 +271,7 @@ impl OpenAiProvider {
         &self,
         system_prompt: Option<&str>,
         messages: &[Message],
+        tools: Option<&[super::ToolDefinition]>,
     ) -> serde_json::Value {
         let mut msgs = Vec::new();
 
@@ -324,8 +325,10 @@ impl OpenAiProvider {
             });
         }
 
-        // Add tools if configured
-        if let Some(tools) = &self.tools {
+        // Add tools if provided or configured
+        if let Some(tools) = tools {
+            body["tools"] = serde_json::to_value(tools).unwrap();
+        } else if let Some(tools) = &self.tools {
             body["tools"] = serde_json::to_value(tools).unwrap();
         }
 
@@ -335,14 +338,15 @@ impl OpenAiProvider {
 
 #[async_trait]
 impl ChatProvider for OpenAiProvider {
-    async fn generate(
+    async fn generate_with_tools(
         &self,
         system_prompt: Option<&str>,
         messages: &[Message],
+        tools: Option<&[super::ToolDefinition]>,
     ) -> Result<GenerateStream, ChatError> {
         let url = format!("{}/chat/completions", self.base_url);
         let headers = self.build_headers()?;
-        let body = self.build_request_body(system_prompt, messages);
+        let body = self.build_request_body(system_prompt, messages, tools);
 
         let response = self
             .client
@@ -610,7 +614,7 @@ data: [DONE]"#;
         let provider = OpenAiProvider::new("test-key", "gpt-4o").unwrap();
         let messages = vec![Message::user("Hello")];
         
-        let body = provider.build_request_body(Some("Be helpful"), &messages);
+        let body = provider.build_request_body(Some("Be helpful"), &messages, None);
         
         assert_eq!(body["model"], "gpt-4o");
         assert_eq!(body["stream"], true);

@@ -5,12 +5,12 @@
 use crate::chat_provider::{
     ChatError, ChatOptions, ChatProvider, GenerateStream, ModelCapability, ThinkingEffort,
 };
-use crate::message::{Message, Role, ToolCall};
+use crate::message::{Message, ToolCall};
 use async_trait::async_trait;
 use futures::{stream, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
+
 
 /// Default base URL for the Kimi API.
 const KIMI_API_BASE: HeaderValue = HeaderValue::from_static("https://api.moonshot.cn/v1");
@@ -47,6 +47,8 @@ struct KimiRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<super::ToolDefinition>>,
 }
 
 /// Response format for structured outputs.
@@ -275,6 +277,7 @@ impl KimiProvider {
         &self,
         system_prompt: Option<&str>,
         messages: &[Message],
+        tools: Option<&[super::ToolDefinition]>,
     ) -> KimiRequest {
         let mut kimi_messages: Vec<KimiMessage> = messages
             .iter()
@@ -308,19 +311,21 @@ impl KimiProvider {
             response_format: self.options.response_format.as_ref().map(|f| ResponseFormat {
                 r#type: f.type_str().to_string(),
             }),
+            tools: tools.map(|t| t.to_vec()),
         }
     }
 }
 
 #[async_trait]
 impl ChatProvider for KimiProvider {
-    async fn generate(
+    async fn generate_with_tools(
         &self,
         system_prompt: Option<&str>,
         messages: &[Message],
+        tools: Option<&[super::ToolDefinition]>,
     ) -> Result<GenerateStream, ChatError> {
         let headers = self.build_headers()?;
-        let body = self.build_request_body(system_prompt, messages);
+        let body = self.build_request_body(system_prompt, messages, tools);
 
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -391,11 +396,13 @@ impl ChatProvider for KimiProvider {
                             match serde_json::from_str::<KimiStreamChunk>(data) {
                                 Ok(chunk) => {
                                     if let Some(choice) = chunk.choices.into_iter().next() {
+                                        // Check for content first
                                         if let Some(content) = choice.delta.content {
                                             if !content.is_empty() {
                                                 return Some((Ok(content), (byte_stream, buffer)));
                                             }
                                         }
+                                        // TODO: Handle tool_calls in delta
                                         // Skip reasoning_content for now
                                     }
                                 }
@@ -506,11 +513,37 @@ mod tests {
     fn test_build_request_body() {
         let provider = KimiProvider::new("test-key", "kimi-k2-0711-preview", None::<&str>).unwrap();
         let messages = vec![Message::user("Hello")];
-        let body = provider.build_request_body(Some("You are helpful"), &messages);
+        let body = provider.build_request_body(Some("You are helpful"), &messages, None);
 
         assert_eq!(body.model, "kimi-k2-0711-preview");
         assert_eq!(body.messages.len(), 2); // system + user
         assert_eq!(body.messages[0].role, "system");
         assert_eq!(body.messages[1].role, "user");
+    }
+
+    #[test]
+    fn test_build_request_body_with_tools() {
+        use crate::chat_provider::ToolDefinition;
+        
+        let provider = KimiProvider::new("test-key", "kimi-k2-0711-preview", None::<&str>).unwrap();
+        let messages = vec![Message::user("Hello")];
+        let tools = vec![
+            ToolDefinition::new(
+                "read_file",
+                "Read a file from disk",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"}
+                    },
+                    "required": ["path"]
+                })
+            )
+        ];
+        let body = provider.build_request_body(Some("You are helpful"), &messages, Some(&tools));
+
+        assert_eq!(body.model, "kimi-k2-0711-preview");
+        assert!(body.tools.is_some());
+        assert_eq!(body.tools.unwrap().len(), 1);
     }
 }

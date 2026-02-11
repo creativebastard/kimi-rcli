@@ -9,6 +9,40 @@ use futures::Stream;
 use std::pin::Pin;
 use thiserror::Error;
 
+/// A tool definition for function calling.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolDefinition {
+    /// The type of tool (typically "function").
+    pub r#type: String,
+    /// The function definition.
+    pub function: FunctionDefinition,
+}
+
+/// A function definition for tool calling.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FunctionDefinition {
+    /// The name of the function.
+    pub name: String,
+    /// A description of what the function does.
+    pub description: String,
+    /// The JSON schema for the function's parameters.
+    pub parameters: serde_json::Value,
+}
+
+impl ToolDefinition {
+    /// Create a new tool definition from a name, description, and parameters schema.
+    pub fn new(name: impl Into<String>, description: impl Into<String>, parameters: serde_json::Value) -> Self {
+        Self {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: name.into(),
+                description: description.into(),
+                parameters,
+            },
+        }
+    }
+}
+
 /// Errors that can occur during chat operations.
 #[derive(Error, Debug)]
 pub enum ChatError {
@@ -150,6 +184,32 @@ pub trait ChatProvider: Send + Sync {
         &self,
         system_prompt: Option<&str>,
         messages: &[Message],
+    ) -> Result<GenerateStream, ChatError> {
+        // Default implementation delegates to generate_with_tools without tools
+        self.generate_with_tools(system_prompt, messages, None).await
+    }
+
+    /// Generates a streaming response from the model with optional tool support.
+    ///
+    /// # Arguments
+    ///
+    /// * `system_prompt` - Optional system instructions for the model.
+    /// * `messages` - The conversation history.
+    /// * `tools` - Optional list of tool definitions for function calling.
+    ///
+    /// # Returns
+    ///
+    /// A stream of text chunks that can be consumed asynchronously.
+    /// When the model makes tool calls, they will be included in the message stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ChatError`] if the request fails or the response cannot be parsed.
+    async fn generate_with_tools(
+        &self,
+        system_prompt: Option<&str>,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
     ) -> Result<GenerateStream, ChatError>;
 
     /// Returns the model name used by this provider.
