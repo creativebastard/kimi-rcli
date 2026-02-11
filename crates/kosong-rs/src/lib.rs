@@ -15,7 +15,7 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use kosong_rs::{ChatProvider, KimiProvider, Message, Role};
+//! use kosong_rs::{ChatProvider, KimiProvider, Message, Role, StreamChunk};
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +27,10 @@
 //!
 //! let mut stream = provider.generate(None, &messages).await?;
 //! while let Some(chunk) = stream.next().await {
-//!     print!("{}", chunk?);
+//!     match chunk? {
+//!         StreamChunk::Text(text) => print!("{}", text),
+//!         StreamChunk::ToolCall(tool_call) => println!("Tool call: {:?}", tool_call),
+//!     }
 //! }
 //! # Ok(())
 //! # }
@@ -38,7 +41,7 @@ pub mod message;
 pub mod tooling;
 
 // Re-export main types for convenience
-pub use chat_provider::{ChatProvider, ChatError, GenerateStream, ModelCapability, ThinkingEffort};
+pub use chat_provider::{ChatProvider, ChatError, GenerateStream, StreamChunk, ModelCapability, ThinkingEffort};
 pub use chat_provider::kimi::KimiProvider;
 pub use chat_provider::openai::OpenAiProvider;
 pub use message::{ContentPart, Message, Role, ToolCall, ToolResult};

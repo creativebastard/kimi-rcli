@@ -29,6 +29,16 @@ pub enum WireMessage {
     AudioUrlPart { url: String },
     /// Video URL content part
     VideoUrlPart { url: String },
+    /// Tool execution beginning
+    ToolBegin {
+        name: String,
+        arguments: String,
+    },
+    /// Tool execution completed
+    ToolEnd {
+        name: String,
+        result: String,
+    },
     /// Complete tool call
     ToolCall {
         id: String,

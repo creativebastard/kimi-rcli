@@ -516,7 +516,7 @@ impl KimiSoul {
 
     /// Process a message with the LLM provider
     pub async fn process_with_llm(
-        &self,
+        &mut self,
         provider: &dyn ChatProvider,
         user_input: UserInput,
         wire: &WireSoulSide,

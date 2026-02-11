@@ -3,7 +3,7 @@
 //! This module provides a [`ChatProvider`] implementation for Moonshot AI's Kimi API.
 
 use crate::chat_provider::{
-    ChatError, ChatOptions, ChatProvider, GenerateStream, ModelCapability, ThinkingEffort,
+    ChatError, ChatOptions, ChatProvider, GenerateStream, StreamChunk, ModelCapability, ThinkingEffort,
 };
 use crate::message::{Message, ToolCall};
 use async_trait::async_trait;
@@ -363,15 +363,26 @@ impl ChatProvider for KimiProvider {
         // For streaming, we process the SSE stream
         if !self.options.stream {
             let kimi_response: KimiResponse = response.json().await.map_err(ChatError::Request)?;
-            let text = kimi_response
-                .choices
-                .into_iter()
-                .next()
-                .and_then(|c| c.message.content)
-                .unwrap_or_default();
-
-            // Create a single-item stream
-            let stream = stream::once(async move { Ok(text) });
+            
+            // Check for tool calls first
+            if let Some(choice) = kimi_response.choices.into_iter().next() {
+                if let Some(tool_calls) = choice.message.tool_calls {
+                    // Return tool calls as stream chunks
+                    let chunks: Vec<_> = tool_calls.into_iter()
+                        .map(|tc| Ok(StreamChunk::ToolCall(tc)))
+                        .collect();
+                    let stream = stream::iter(chunks);
+                    return Ok(Box::pin(stream));
+                }
+                
+                // Return text content
+                let text = choice.message.content.unwrap_or_default();
+                let stream = stream::once(async move { Ok(StreamChunk::Text(text)) });
+                return Ok(Box::pin(stream));
+            }
+            
+            // Empty response
+            let stream = stream::once(async move { Ok(StreamChunk::Text(String::new())) });
             return Ok(Box::pin(stream));
         }
 
@@ -401,13 +412,19 @@ impl ChatProvider for KimiProvider {
                             match serde_json::from_str::<KimiStreamChunk>(data) {
                                 Ok(chunk) => {
                                     if let Some(choice) = chunk.choices.into_iter().next() {
-                                        // Check for content first
-                                        if let Some(content) = choice.delta.content {
-                                            if !content.is_empty() {
-                                                return Some((Ok(content), (byte_stream, buffer)));
+                                        // Check for tool_calls first
+                                        if let Some(tool_calls) = choice.delta.tool_calls {
+                                            // Return the first tool call as a chunk
+                                            if let Some(tool_call) = tool_calls.into_iter().next() {
+                                                return Some((Ok(StreamChunk::ToolCall(tool_call)), (byte_stream, buffer)));
                                             }
                                         }
-                                        // TODO: Handle tool_calls in delta
+                                        // Check for content
+                                        if let Some(content) = choice.delta.content {
+                                            if !content.is_empty() {
+                                                return Some((Ok(StreamChunk::Text(content)), (byte_stream, buffer)));
+                                            }
+                                        }
                                         // Skip reasoning_content for now
                                     }
                                 }

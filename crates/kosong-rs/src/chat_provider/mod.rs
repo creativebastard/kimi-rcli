@@ -3,7 +3,7 @@
 //! This module defines the core [`ChatProvider`] trait and related types
 //! for implementing LLM provider clients.
 
-use crate::message::Message;
+use crate::message::{Message, ToolCall};
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
@@ -80,8 +80,17 @@ pub enum ChatError {
     Other(String),
 }
 
-/// A stream of generated text chunks.
-pub type GenerateStream = Pin<Box<dyn Stream<Item = Result<String, ChatError>> + Send>>;
+/// A chunk in the generated stream.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamChunk {
+    /// Text content
+    Text(String),
+    /// Tool call
+    ToolCall(ToolCall),
+}
+
+/// A stream of generated chunks (text or tool calls).
+pub type GenerateStream = Pin<Box<dyn Stream<Item = Result<StreamChunk, ChatError>> + Send>>;
 
 /// Capabilities that a model may support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

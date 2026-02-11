@@ -1,7 +1,7 @@
 //! Chat processing for LLM interactions
 //!
 //! This module handles the actual chat processing between the user and the LLM,
-//! including message building, streaming responses, and wire protocol integration.
+//! including message building, streaming responses, tool calling, and wire protocol integration.
 
 use crate::context::Context;
 use crate::soul::{KimiSoul, SoulError, WireSoulSide};
@@ -9,19 +9,59 @@ use crate::types::UserInput;
 use crate::wire::WireMessage;
 use futures::StreamExt;
 use kosong_rs::{ChatProvider, Message as KosongMessage, Role as KosongRole};
+use kosong_rs::chat_provider::ToolDefinition;
+use tracing::{debug, info, warn};
 
-/// Process a user message through the LLM
+/// Process a user message through the LLM with tool support
 pub async fn process_message(
-    soul: &KimiSoul,
+    soul: &mut KimiSoul,
     provider: &dyn ChatProvider,
     user_input: UserInput,
     wire: &WireSoulSide,
 ) -> Result<String, SoulError> {
-    // Build messages from context
-    let mut messages = build_messages(&soul.context);
+    // Add user message to context
+    soul.context.add_message(crate::types::Message {
+        role: crate::types::Role::User,
+        content: user_input.text.clone(),
+        metadata: None,
+    });
 
-    // Add user message
-    messages.push(KosongMessage::user(user_input.text));
+    // Process with potential tool call loops (max 5 iterations)
+    let max_iterations = 5;
+    for iteration in 0..max_iterations {
+        let result = process_single_turn(soul, provider, wire).await?;
+        
+        match result {
+            TurnResult::Complete(response) => {
+                return Ok(response);
+            }
+            TurnResult::ToolCallsExecuted => {
+                // Continue to next iteration to get final response
+                debug!("Tool calls executed, continuing to iteration {}", iteration + 1);
+                continue;
+            }
+        }
+    }
+    
+    Err(SoulError::MaxIterations)
+}
+
+/// Result of a single turn
+enum TurnResult {
+    /// Turn completed with final response
+    Complete(String),
+    /// Tool calls were executed, need another turn
+    ToolCallsExecuted,
+}
+
+/// Process a single turn (one LLM call)
+async fn process_single_turn(
+    soul: &mut KimiSoul,
+    provider: &dyn ChatProvider,
+    wire: &WireSoulSide,
+) -> Result<TurnResult, SoulError> {
+    // Build messages from context
+    let messages = build_messages(&soul.context);
 
     // Get system prompt from agent
     let system_prompt = if soul.agent.system_prompt.is_empty() {
@@ -30,21 +70,34 @@ pub async fn process_message(
         Some(soul.agent.system_prompt.as_str())
     };
 
-    // Generate response
+    // Convert toolset to ToolDefinitions
+    let tools = if soul.toolset.tool_count() > 0 {
+        Some(build_tool_definitions(&soul.toolset))
+    } else {
+        None
+    };
+
+    // Generate response with tools
     let mut stream = provider
-        .generate(system_prompt, &messages)
+        .generate_with_tools(system_prompt, &messages, tools.as_deref())
         .await
         .map_err(|e| SoulError::Llm(e.to_string()))?;
 
     // Stream response back through wire and collect full text
     let mut full_response = String::new();
+    let mut pending_tool_calls = Vec::new();
+
     while let Some(chunk) = stream.next().await {
         match chunk {
-            Ok(text) => {
+            Ok(kosong_rs::StreamChunk::Text(text)) => {
                 wire.send(WireMessage::TextPart { text: text.clone() })
                     .await
                     .map_err(|e| SoulError::Wire(e.to_string()))?;
                 full_response.push_str(&text);
+            }
+            Ok(kosong_rs::StreamChunk::ToolCall(tool_call)) => {
+                debug!("Received tool call: {:?}", tool_call);
+                pending_tool_calls.push(tool_call);
             }
             Err(e) => {
                 return Err(SoulError::Llm(e.to_string()));
@@ -52,7 +105,112 @@ pub async fn process_message(
         }
     }
 
-    Ok(full_response)
+    // Process any tool calls
+    if !pending_tool_calls.is_empty() {
+        info!("Processing {} tool calls", pending_tool_calls.len());
+        
+        // Add assistant message with tool calls to context
+        soul.context.add_message(crate::types::Message {
+            role: crate::types::Role::Assistant,
+            content: full_response.clone(),
+            metadata: Some({
+                let mut map = std::collections::HashMap::new();
+                map.insert("tool_calls".to_string(), serde_json::json!(pending_tool_calls));
+                map
+            }),
+        });
+
+        // Execute tool calls and collect results
+        for tool_call in pending_tool_calls {
+            let result = execute_tool_call(soul, &tool_call, wire).await?;
+            
+            // Add tool result to context
+            soul.context.add_message(crate::types::Message {
+                role: crate::types::Role::Tool,
+                content: result,
+                metadata: None,
+            });
+        }
+
+        return Ok(TurnResult::ToolCallsExecuted);
+    }
+
+    // Add assistant message to context
+    soul.context.add_message(crate::types::Message {
+        role: crate::types::Role::Assistant,
+        content: full_response.clone(),
+        metadata: None,
+    });
+
+    Ok(TurnResult::Complete(full_response))
+}
+
+/// Build tool definitions from the soul's toolset
+fn build_tool_definitions(toolset: &crate::soul::KimiToolset) -> Vec<ToolDefinition> {
+    toolset
+        .schemas()
+        .iter()
+        .filter_map(|schema| {
+            // Parse the schema which should be in the format:
+            // { "type": "function", "function": { "name": "...", "description": "...", "parameters": {...} } }
+            let function = schema.get("function")?;
+            let name = function.get("name")?.as_str()?.to_string();
+            let description = function.get("description")?.as_str()?.to_string();
+            let parameters = function.get("parameters")?.clone();
+
+            Some(ToolDefinition::new(name, description, parameters))
+        })
+        .collect()
+}
+
+/// Execute a tool call and return the result
+async fn execute_tool_call(
+    soul: &mut KimiSoul,
+    tool_call: &kosong_rs::ToolCall,
+    wire: &WireSoulSide,
+) -> Result<String, SoulError> {
+    let tool_name = &tool_call.function.name;
+    info!("Executing tool: {} (id: {})", tool_name, tool_call.id);
+
+    // Check if tool exists
+    if !soul.toolset.contains(tool_name) {
+        let error_msg = format!("Tool not found: {}", tool_name);
+        warn!("{}", error_msg);
+        return Ok(error_msg);
+    }
+
+    // Parse arguments
+    let params: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
+        .map_err(|e| SoulError::Tool(format!("Invalid tool arguments: {}", e)))?;
+
+    // Send tool begin message
+    wire.send(WireMessage::ToolBegin {
+        name: tool_name.clone(),
+        arguments: tool_call.function.arguments.clone(),
+    }).await.map_err(|e| SoulError::Wire(e.to_string()))?;
+
+    // Execute the tool
+    let result = match soul.toolset.execute(tool_name, params).await {
+        Ok(output) => {
+            let output_str = serde_json::to_string(&output)
+                .unwrap_or_else(|_| output.to_string());
+            info!("Tool {} executed successfully", tool_name);
+            output_str
+        }
+        Err(e) => {
+            let error_msg = format!("Tool execution failed: {}", e);
+            warn!("{}", error_msg);
+            error_msg
+        }
+    };
+
+    // Send tool end message
+    wire.send(WireMessage::ToolEnd {
+        name: tool_name.clone(),
+        result: result.clone(),
+    }).await.map_err(|e| SoulError::Wire(e.to_string()))?;
+
+    Ok(result)
 }
 
 /// Build message history from context

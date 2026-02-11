@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use kosong_rs::{OpenAiProvider, ChatProvider, Message, Role};
+//! use kosong_rs::{OpenAiProvider, ChatProvider, Message, Role, StreamChunk};
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,13 +17,16 @@
 //! let mut stream = provider.generate(None, &messages).await?;
 //!
 //! while let Some(chunk) = stream.next().await {
-//!     print!("{}", chunk?);
+//!     match chunk? {
+//!         StreamChunk::Text(text) => print!("{}", text),
+//!         StreamChunk::ToolCall(tool_call) => println!("Tool call: {:?}", tool_call),
+//!     }
 //! }
 //! # Ok(())
 //! # }
 //! ```
 
-use super::{ChatError, ChatProvider, ChatOptions, GenerateStream, ModelCapability, ThinkingEffort};
+use super::{ChatError, ChatProvider, ChatOptions, GenerateStream, StreamChunk, ModelCapability, ThinkingEffort};
 use crate::message::{Message, ToolCall};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -389,7 +392,7 @@ impl ChatProvider for OpenAiProvider {
 /// Processes the SSE stream from OpenAI API.
 fn process_stream(
     stream: impl Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
-) -> impl Stream<Item = Result<String, ChatError>> + Send + 'static {
+) -> impl Stream<Item = Result<StreamChunk, ChatError>> + Send + 'static {
     stream
         .map(|result| {
             result.map_err(ChatError::Request).and_then(|bytes| {
@@ -407,7 +410,7 @@ fn process_stream(
 }
 
 /// Parses SSE (Server-Sent Events) chunks from the OpenAI API.
-fn parse_sse_chunks(text: &str) -> Vec<Result<String, ChatError>> {
+fn parse_sse_chunks(text: &str) -> Vec<Result<StreamChunk, ChatError>> {
     let mut results = Vec::new();
 
     for line in text.lines() {
@@ -429,7 +432,7 @@ fn parse_sse_chunks(text: &str) -> Vec<Result<String, ChatError>> {
 
             // Parse the JSON chunk
             match parse_chunk_json(data) {
-                Ok(Some(content)) => results.push(Ok(content)),
+                Ok(Some(chunk)) => results.push(Ok(chunk)),
                 Ok(None) => {} // No content in this chunk
                 Err(e) => results.push(Err(e)),
             }
@@ -440,15 +443,22 @@ fn parse_sse_chunks(text: &str) -> Vec<Result<String, ChatError>> {
 }
 
 /// Parses a single SSE data chunk.
-fn parse_chunk_json(data: &str) -> Result<Option<String>, ChatError> {
-    let chunk: StreamChunk = serde_json::from_str(data)
+fn parse_chunk_json(data: &str) -> Result<Option<super::StreamChunk>, ChatError> {
+    let chunk: OpenAiStreamChunk = serde_json::from_str(data)
         .map_err(|e| ChatError::Parse(format!("Failed to parse chunk: {} - {}", e, data)))?;
 
     // Extract content from delta
     if let Some(choice) = chunk.choices.first() {
         if let Some(delta) = &choice.delta {
+            // Check for tool calls first
+            if let Some(tool_calls) = &delta.tool_calls {
+                if let Some(tool_call) = tool_calls.first() {
+                    return Ok(Some(super::StreamChunk::ToolCall(tool_call.clone())));
+                }
+            }
+            // Check for content
             if let Some(content) = &delta.content {
-                return Ok(Some(content.clone()));
+                return Ok(Some(super::StreamChunk::Text(content.clone())));
             }
         }
     }
@@ -456,9 +466,9 @@ fn parse_chunk_json(data: &str) -> Result<Option<String>, ChatError> {
     Ok(None)
 }
 
-/// A chunk from the streaming response.
+/// A chunk from the streaming response (internal parsing struct).
 #[derive(Debug, Deserialize)]
-struct StreamChunk {
+struct OpenAiStreamChunk {
     /// The chunk ID.
     #[allow(dead_code)]
     id: String,
@@ -466,17 +476,17 @@ struct StreamChunk {
     #[allow(dead_code)]
     object: String,
     /// The choices in this chunk.
-    choices: Vec<StreamChoice>,
+    choices: Vec<OpenAiStreamChoice>,
 }
 
 /// A choice within a stream chunk.
 #[derive(Debug, Deserialize)]
-struct StreamChoice {
+struct OpenAiStreamChoice {
     /// The index of this choice.
     #[allow(dead_code)]
     index: u32,
     /// The delta content.
-    delta: Option<StreamDelta>,
+    delta: Option<OpenAiStreamDelta>,
     /// The finish reason if this is the last chunk.
     #[serde(rename = "finish_reason")]
     #[allow(dead_code)]
@@ -485,7 +495,7 @@ struct StreamChoice {
 
 /// The delta content within a choice.
 #[derive(Debug, Deserialize)]
-struct StreamDelta {
+struct OpenAiStreamDelta {
     /// The role (typically only in first chunk).
     #[allow(dead_code)]
     role: Option<String>,
@@ -605,8 +615,8 @@ data: [DONE]"#;
 
         let results = parse_sse_chunks(sse_data);
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].as_ref().unwrap(), "Hello");
-        assert_eq!(results[1].as_ref().unwrap(), " world");
+        assert_eq!(results[0].as_ref().unwrap(), &super::StreamChunk::Text("Hello".to_string()));
+        assert_eq!(results[1].as_ref().unwrap(), &super::StreamChunk::Text(" world".to_string()));
     }
 
     #[test]
