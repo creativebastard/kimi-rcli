@@ -70,12 +70,16 @@ impl Config {
 pub struct LlmProvider {
     pub provider_type: ProviderType,
     pub base_url: String,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing, default = "default_secret")]
     pub api_key: SecretString,
     pub env: Option<HashMap<String, String>>,
     pub custom_headers: Option<HashMap<String, String>>,
     /// OAuth credential reference (do not store tokens here)
     pub oauth: Option<OAuthRef>,
+}
+
+fn default_secret() -> SecretString {
+    SecretString::new(String::new())
 }
 
 impl LlmProvider {
@@ -209,6 +213,7 @@ pub fn save_config(config: &Config, path: Option<&Path>) -> Result<(), ConfigErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
 
     #[test]
     fn test_provider_type_default_urls() {
@@ -238,5 +243,51 @@ mod tests {
         assert!(matches!(provider.provider_type, ProviderType::Kimi));
         assert_eq!(provider.base_url, "https://custom.api.com");
         assert!(provider.env.is_some());
+    }
+
+    #[test]
+    fn test_config_deserialization_without_api_key() {
+        // This tests that OAuth-based providers can be loaded without an api_key field
+        let config_str = r#"
+default_model = "kimi-code/kimi-for-coding"
+default_thinking = false
+default_yolo = false
+
+[models."kimi-code/kimi-for-coding"]
+name = "kimi-code/kimi-for-coding"
+provider = "managed:kimi-code"
+max_tokens = 128000
+
+[providers."managed:kimi-code"]
+provider_type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+
+[providers."managed:kimi-code".oauth]
+storage = "file"
+key = "oauth/kimi-code"
+
+[loop_control]
+max_iterations = 100
+timeout_seconds = 300
+
+[services]
+enabled = []
+config = {}
+
+[mcp]
+servers = []
+"#;
+        
+        let result: Result<Config, _> = toml::from_str(config_str);
+        assert!(result.is_ok(), "Failed to parse config: {:?}", result.err());
+        
+        let config = result.unwrap();
+        assert_eq!(config.default_model, "kimi-code/kimi-for-coding");
+        assert!(config.providers.contains_key("managed:kimi-code"));
+        
+        let provider = config.providers.get("managed:kimi-code").unwrap();
+        assert!(provider.oauth.is_some());
+        // api_key should default to empty string
+        assert_eq!(provider.api_key.expose_secret(), "");
     }
 }
