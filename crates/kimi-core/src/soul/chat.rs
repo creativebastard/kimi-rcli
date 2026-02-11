@@ -179,9 +179,37 @@ async fn execute_tool_call(
         return Ok(error_msg);
     }
 
-    // Parse arguments
+    // Parse arguments for approval description
     let params: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
         .map_err(|e| SoulError::Tool(format!("Invalid tool arguments: {}", e)))?;
+
+    // Build approval description based on tool and params
+    let description = build_approval_description(tool_name, &params);
+
+    // Request approval (unless in yolo mode)
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let approval_request = crate::types::Request {
+        id: request_id.clone(),
+        tool_call_id: tool_call.id.clone(),
+        sender: "kimi".to_string(),
+        action: tool_name.clone(),
+        description: description.clone(),
+    };
+
+    let approval_kind = soul.approval.request(approval_request).await;
+    
+    match approval_kind {
+        crate::types::ApprovalKind::Reject => {
+            info!("Tool {} rejected by user", tool_name);
+            return Ok(format!("Tool '{}' was rejected by user approval", tool_name));
+        }
+        crate::types::ApprovalKind::ApproveOnce => {
+            // ApproveOnce is treated as Approve for a single tool call
+        }
+        crate::types::ApprovalKind::Approve => {
+            // Continue with execution
+        }
+    }
 
     // Send tool begin message
     wire.send(WireMessage::ToolBegin {
@@ -211,6 +239,48 @@ async fn execute_tool_call(
     }).await.map_err(|e| SoulError::Wire(e.to_string()))?;
 
     Ok(result)
+}
+
+/// Build a human-readable description for approval request
+fn build_approval_description(tool_name: &str, params: &serde_json::Value) -> String {
+    match tool_name {
+        "WriteFile" => {
+            let path = params.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
+            let mode = params.get("mode").and_then(|m| m.as_str()).unwrap_or("overwrite");
+            format!("Write file '{}' ({})", path, mode)
+        }
+        "StrReplaceFile" => {
+            let path = params.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
+            format!("Edit file '{}'", path)
+        }
+        "Shell" => {
+            let command = params.get("command").and_then(|c| c.as_str()).unwrap_or("unknown");
+            // Truncate long commands
+            let cmd_display = if command.len() > 60 {
+                format!("{}...", &command[..60])
+            } else {
+                command.to_string()
+            };
+            format!("Execute shell command: {}", cmd_display)
+        }
+        "ReadFile" => {
+            let path = params.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
+            format!("Read file '{}'", path)
+        }
+        "Glob" => {
+            let pattern = params.get("pattern").and_then(|p| p.as_str()).unwrap_or("unknown");
+            format!("Search files matching '{}'", pattern)
+        }
+        "Grep" => {
+            let pattern = params.get("pattern").and_then(|p| p.as_str()).unwrap_or("unknown");
+            format!("Search for pattern '{}'", pattern)
+        }
+        "Task" => {
+            let desc = params.get("description").and_then(|d| d.as_str()).unwrap_or("unknown");
+            format!("Spawn subagent task: {}", desc)
+        }
+        _ => format!("Execute tool '{}'", tool_name),
+    }
 }
 
 /// Build message history from context
